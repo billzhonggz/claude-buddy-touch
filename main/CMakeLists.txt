@@ -1,0 +1,5 @@
+idf_component_register(
+    SRCS "main.c" "display.c"
+    INCLUDE_DIRS "."
+    REQUIRES esp32_p4_wifi6_touch_lcd_4_3 nvs_flash
+)
