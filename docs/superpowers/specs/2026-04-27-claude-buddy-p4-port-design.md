@@ -1,6 +1,6 @@
 # Claude Desktop Buddy: ESP32-P4 Port Design
 
-> **Status**: Approved Design (updated 2026-04-27 with IDF v6.0 adaptations)
+> **Status**: Approved Design (updated 2026-04-28 — BLE unblocked via esp_hosted managed components)
 > **Target Hardware**: Waveshare ESP32-P4-WIFI6-Touch-LCD-4.3
 > **Source Project**: claude-desktop-buddy (M5StickC Plus / Arduino / PlatformIO)
 > **Date**: 2026-04-27
@@ -14,8 +14,8 @@
 │                      ESP32-P4 (Main CPU)                         │
 │                                                                  │
 │  ┌─────────────────────────┐  ┌──────────────────────────────┐  │
-│  │ LVGL UI (480×800 MIPI)   │  │ BLE Bridge Client            │  │
-│  │ • Pet/GIF animation      │  │ (talks to C6 via SDIO/UART)  │  │
+│  │ LVGL UI (480×800 MIPI)   │  │ BLE Bridge / NimBLE NUS      │  │
+│  │ • Pet/GIF animation      │  │ (talks to C6 via SDIO)       │  │
 │  │ • Permission UI          │  ├──────────────────────────────┤  │
 │  │ • Clock, Settings        │  │ Data Layer (data.h port)     │  │
 │  │ • Touch controls         │  │ JSON parsing, state machine  │  │
@@ -29,18 +29,19 @@
 │                                ├──────────────────────────────┤  │
 │                                │ Audio (ES8311 beeps)         │  │
 │  ┌─────────────────────────┐  └──────────────────────────────┘  │
-│  │ SDIO/UART link to C6    │                                    │
+│  │ SDIO link to C6          │                                    │
+│  │ (esp_hosted transport)    │                                    │
 │  └───────────┬─────────────┘                                    │
 └──────────────┼──────────────────────────────────────────────────┘
-               │ SDIO/UART
+               │ SDIO (4-bit, 40MHz)
 ┌──────────────▼──────────────────────────────────────────────────┐
 │                      ESP32-C6 (Coprocessor)                      │
 │                                                                  │
-│  BLE NUS Firmware (custom or esp_hosted)                         │
+│  ESP-Hosted Slave Firmware (pre-flashed from factory)            │
 │  • Full WiFi 6 + BLE 5 stack                                     │
-│  • Nordic UART Service (6e400001...)                              │
-│  • LE Secure Connections + passkey display on P4                 │
-│  • Raw BLE data relayed to P4 via SDIO                           │
+│  • Hosted HCI: HCI commands/events multiplexed over SDIO         │
+│  • Nordic UART Service (6e400001...) runs in P4's NimBLE host    │
+│  • Raw BLE data relayed to P4 via SDIO Hosted HCI                │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -51,7 +52,7 @@
 | Framework | **ESP-IDF 6.0** | Arduino unsupported on ESP32-P4 |
 | Display | **LVGL v9 via Waveshare BSP** | Hardware-accelerated, touch support, standard examples |
 | LVGL Adapter | **Direct LVGL init** (bypassed esp_lvgl_adapter) | Adapter v0.1.x incompatible with IDF v6.0 |
-| BLE | **TBD** — custom C6 NUS firmware or ported esp_hosted | esp_hosted/esp_wifi_remote incompatible with IDF v6.0 |
+| BLE | **esp_hosted v2 + esp_wifi_remote via managed components** | C6 runs ESP-Hosted slave firmware (pre-flashed). P4 runs NimBLE host + Hosted HCI over shared SDIO. Pattern from `esp-hosted-mcu/examples/host_nimble_bleprph_host_only_vhci` |
 | Input | **Capacitive touch** | Replaces button navigation, more intuitive |
 | Audio | **ES8311 via I2S codec component** | For beeps/tones (deferred — not yet adapted for IDF v6.0) |
 | Storage | **SD card (SDMMC) + nvs_flash** | SD for large GIF files, NVS for settings |
@@ -134,8 +135,10 @@
 
 ### BLE Inbound
 ```
-C6 BLE ← desktop JSON heartbeat
-  → SDIO/UART → C6 firmware relays to P4
+Desktop BLE → C6 BLE radio
+  → C6 firmware encodes HCI event → SDIO
+  → esp_hosted transport receives Hosted HCI frame
+  → NimBLE host stack on P4 processes HCI event
   → data.h accumulates bytes in ring buffer
   → dataPoll() parses \n-delimited JSON
   → TamaState updated
@@ -147,13 +150,13 @@ C6 BLE ← desktop JSON heartbeat
 ```
 Touch approve/deny
   → main.c formats {"cmd":"permission","id":"...","decision":"..."}
-  → bleWrite() → C6 → BLE notify → desktop
+  → NimBLE NUS TX notify → Hosted HCI → SDIO → C6 → BLE notify → desktop
 ```
 
 ### Folder Push
 ```
 Desktop drops folder
-  → C6 BLE → SDIO → xfer.h parses commands
+  → C6 BLE → Hosted HCI → SDIO → NimBLE host → xfer.h parses commands
   → Writes files to SD card /characters/<name>/
   → characterInit() loads manifest.json
   → LVGL pet canvas starts animating
@@ -188,9 +191,12 @@ Identical UUIDs and protocol as REFERENCE.md:
 - LE Secure Connections with passkey entry (DisplayOnly)
 - Advertise as `Claude-XXXX`
 
-Implementation approach TBD:
-- **Option A**: esp_hosted (standard — blocked on IDF v6.0 compatibility)
-- **Option B**: Custom C6 firmware running NUS independently, communicating with P4 via UART/SDIO
+Implementation approach:
+- **Hosted HCI (VHCI)** over shared SDIO transport — no extra GPIOs needed
+- P4 runs NimBLE host stack with NUS GATT service
+- C6 runs ESP-Hosted slave firmware (pre-flashed from factory, no reflash needed)
+- `esp_hosted` bt_controller_init/enable brings C6 BT controller online
+- Pattern from `esp-hosted-mcu/examples/host_nimble_bleprph_host_only_vhci/`
 
 ---
 
@@ -212,7 +218,7 @@ No memory concerns — the P4 has orders of magnitude more RAM than the original
 ### Phase 1: Foundation ✅ (partial)
 1. ✅ ESP-IDF project with correct CMakeLists, sdkconfig, partitions
 2. ✅ Display + touch init via Waveshare BSP, LVGL "Hello World" — **adapted for IDF v6.0**
-3. ❌ C6 BLE — blocked by IDF v6.0 compatibility (esp_hosted/esp_wifi_remote)
+3. ✅ C6 BLE — unblocked via `esp_hosted` v2 + `esp_wifi_remote` managed components. C6 runs ESP-Hosted slave firmware (pre-flashed). P4 runs NimBLE host + Hosted HCI VHCI over SDIO.
 4. ❌ Port `data.h` — deferred
 5. ❌ Display "Connected / Idle" status — deferred
 6. ❌ Idle timeout → screen dimming — deferred
@@ -273,9 +279,9 @@ No memory concerns — the P4 has orders of magnitude more RAM than the original
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| C6 BLE via esp_hosted not compatible with IDF v6.0 | **High** | Fallback: custom C6 NUS firmware over UART; or downgrade to IDF 5.4 |
+| SDIO pin mapping differs between Waveshare board and ESP32-P4-Function-EV-Board | **Medium** | Waveshare WiFi example works with esp_hosted, proving pins are correct. If mismatch, configure via Kconfig or `esp_hosted_set_sdio_pins()` |
 | MIPI DSI + LVGL complexity | Low | BSP component handles low-level; display now working |
 | GIF decode performance | Low | 32MB PSRAM + PPA acceleration; can pre-decode frames |
 | Audio driver (ES8311) not yet adapted for IDF v6.0 | Low | Deferred to Phase 4; esp_codec_dev needs update |
 | Touch gesture robustness | Low | Simple tap/long-press/swipe; refine iteratively |
-| IDF v6.0 API churn | Medium | BSP already adapted; ongoing maintenance risk for registry components |
+| IDF v6.0 managed component version compatibility | **Medium** | Pin to known-working versions from IDF v6.0 examples (`esp_hosted ~2`, `esp_wifi_remote ~0.14`) |
