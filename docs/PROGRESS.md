@@ -1,7 +1,7 @@
 # Porting Progress — Claude Desktop Buddy → ESP32-P4
 
 > **Updated**: 2026-04-28
-> **Status**: Phase 1 (Foundation) — Tasks 1-3 complete, display functional. Task 4 code written but blocked: C6 factory firmware does not respond to BT feature control RPC (Req_FeatureControl timeout). BLE requires C6 firmware with BT support compiled in.
+> **Status**: Phase 1 (Foundation) — Tasks 1-3 complete, display functional. Task 4 code written, BLE init blocked by RPC version mismatch between P4 host (2.12.0) and C6 coprocessor firmware (reported as 0.0.0). C6 needs firmware update to match host's RPC protocol.
 
 ---
 
@@ -68,19 +68,23 @@ The BSP from Waveshare examples was written for IDF 5.x. These changes were need
 
 ### BLE Implementation Status
 
-**SDIO link:** ✅ Working. `esp_hosted_connect_to_slave()` succeeds — C6 communicates over SDIO.
+**SDIO link:** ✅ Working. `esp_hosted_connect_to_slave()` succeeds. Full transport layer established.
 
-**BT controller init:** ❌ Fails. `esp_hosted_bt_controller_init()` sends `Req_FeatureControl` (RPC 0x183) to C6, which times out. Root cause: C6 factory ESP-Hosted slave firmware was compiled without BT support (`#if CONFIG_BT_ENABLED` guarded code in `slave_bt.c` is not compiled in).
+**C6 capabilities:** The C6 reports `capabilities: 0xd` = WLAN + HCI over SDIO + BLE only. The hardware/firmware is capable of BLE. Additionally, `vhci_drv: Host BT Support: Enabled, BT Transport Type: VHCI` confirms the P4-side VHCI driver is ready.
 
-**Evidence from managed component sources:**
-- `slave/main/slave_bt.c:11-13` — Entire BT handler is `#if CONFIG_BT_ENABLED`
-- `slave/main/Kconfig.projbuild:7-10` — `ESP_HOSTED_CP_BT` default depends on `SOC_BT_SUPPORTED`
-- `slave/sdkconfig.defaults.esp32c6:7-10` — Default slave config for C6 does include `CONFIG_BT_ENABLED=y` and `CONFIG_BT_LE_HCI_INTERFACE_USE_RAM=y`
-- Factory firmware on the Waveshare board was likely built with a minimal config that omits BT
+**BT controller init:** ❌ Fails. `esp_hosted_bt_controller_init()` sends `Req_FeatureControl` (RPC 0x183) to C6, which times out.
 
-**Fix path:** Reflash C6 with ESP-Hosted slave firmware built from the managed component sources with `CONFIG_BT_ENABLED=y`. Either:
-1. **OTA from P4 over SDIO** using `esp_hosted_slave_ota_begin/write/end/activate()` — no wiring changes needed
-2. **Direct UART flash** by connecting to C6 UART pins
+**Root cause (from boot log):** RPC protocol version mismatch.
+```
+Version mismatch: Host [2.12.0] > Co-proc [0.0.0] ==> Upgrade co-proc to avoid RPC timeouts
+```
+The P4 host runs ESP-Hosted 2.12.0, but the C6 factory firmware reports version 0.0.0 — its version reporting scheme is incompatible with the host's versioning. The `Req_FeatureControl` RPC command (added in a later ESP-Hosted protocol version) is not recognized by the older C6 firmware, causing the timeout.
+
+**Note:** This is NOT a BT-disabled firmware build. The C6 capabilities clearly include HCI and BLE. The issue is purely an RPC protocol version compatibility problem.
+
+**Fix path:** Update C6 firmware to match the host ESP-Hosted version. Options:
+1. **SDIO OTA from P4** using `esp_hosted_slave_ota_begin/write/end/activate()` — no wiring changes, requires building slave firmware from managed component sources
+2. **Direct UART flash** of C6 with ESP-Hosted slave firmware built from `managed_components/espressif__esp_hosted/slave/`
 
 **Sources:**
 - `examples/wifi/iperf/main/idf_component.yml` — canonical managed component versions for P4

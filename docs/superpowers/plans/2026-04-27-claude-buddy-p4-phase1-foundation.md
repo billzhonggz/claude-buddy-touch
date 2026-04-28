@@ -1,6 +1,6 @@
 # Phase 1: Foundation — Display, BLE, JSON Parsing
 
-> **Last updated**: 2026-04-28 — Tasks 1-3 complete, Task 4 code written (ble_nus.c/h) but BLE initialization blocked: C6 factory firmware does not respond to BT feature control RPC over SDIO
+> **Last updated**: 2026-04-28 — Tasks 1-3 complete, Task 4 code written (ble_nus.c/h) but BLE initialization blocked by RPC version mismatch: P4 host ESP-Hosted 2.12.0 vs C6 coprocessor firmware reporting 0.0.0
 
 **Goal:** Boot ESP32-P4, initialize display + LVGL, connect BLE via C6, receive JSON heartbeat from desktop, display "Connected / idle" status on screen.
 
@@ -144,11 +144,11 @@ CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y
 
 **Code pattern:** Followed `managed_components/espressif__esp_hosted/examples/host_nimble_bleprph_host_only_vhci/main/main.c`
 
-**Root cause:** C6 factory ESP-Hosted slave firmware does not include BT support. The `Req_FeatureControl` RPC command (0x183) times out because the slave-side BT handler (`slave_bt.c`) is guarded by `#if CONFIG_BT_ENABLED` and was not compiled into the factory firmware image.
+**Root cause (from boot log):** RPC protocol version mismatch. P4 host is ESP-Hosted 2.12.0; C6 reports version 0.0.0 (incompatible versioning scheme). The `Req_FeatureControl` RPC command (0x183) was added after the C6 firmware's protocol version and is not recognized. The C6 capabilities (`0xd` = WLAN + HCI over SDIO + BLE only) confirm BT is supported — it's purely a version compatibility issue.
 
 **Fix options:**
-1. Flash C6 with BT-enabled slave firmware via SDIO OTA (`esp_hosted_slave_ota_begin/write/end/activate`)
-2. Flash C6 directly via UART
+1. Update C6 firmware to match host ESP-Hosted protocol version via SDIO OTA (`esp_hosted_slave_ota_begin/write/end/activate`)
+2. Flash C6 directly via UART with ESP-Hosted slave firmware built from managed component sources
 
 ### Task 5: BLE NUS Service
 

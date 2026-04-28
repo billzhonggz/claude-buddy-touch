@@ -60,13 +60,13 @@ Advertises as `Claude-XXXX`. LE Secure Connections with passkey entry.
 
 **Phase 1 (Foundation):** Tasks 1-3 complete. Task 4 code complete but runtime blocked.
 
-**BLE Status:** SDIO link to C6 works (`esp_hosted_connect_to_slave()` succeeds), but `esp_hosted_bt_controller_init()` fails because the C6 factory ESP-Hosted slave firmware does not include BT support (Req_FeatureControl timeout). The C6 needs to be reflashed with BT-enabled slave firmware. See `docs/PROGRESS.md` for full details.
+**BLE Status:** SDIO link to C6 works (`esp_hosted_connect_to_slave()` succeeds), C6 reports capabilities including HCI and BLE, but `esp_hosted_bt_controller_init()` fails due to RPC protocol version mismatch (host ESP-Hosted 2.12.0 vs C6 firmware reporting 0.0.0). The C6 firmware needs updating to match the host's RPC protocol. See `docs/PROGRESS.md` for full details.
 
 **SDK config** includes: `BT_ENABLED`, `BT_CONTROLLER_DISABLED`, `BT_NIMBLE_ENABLED`, `ESP_HOSTED_ENABLE_BT_NIMBLE`, `ESP_HOSTED_NIMBLE_HCI_VHCI`.
 
 **BLE code pattern:** Follows `managed_components/espressif__esp_hosted/examples/host_nimble_bleprph_host_only_vhci/main/main.c`
 
-**C6 firmware fix:** Reflash C6 with ESP-Hosted slave firmware from `managed_components/espressif__esp_hosted/slave/` built with `CONFIG_BT_ENABLED=y`. Options: SDIO OTA from P4, or direct UART flash.
+**C6 firmware fix:** Reflash C6 with ESP-Hosted slave firmware from `managed_components/espressif__esp_hosted/slave/` built at a version matching the host. Options: SDIO OTA from P4, or direct UART flash.
 
 ## Key Design Choices
 

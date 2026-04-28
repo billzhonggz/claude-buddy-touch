@@ -219,7 +219,7 @@ No memory concerns — the P4 has orders of magnitude more RAM than the original
 1. ✅ ESP-IDF project with correct CMakeLists, sdkconfig, partitions
 2. ✅ Display + touch init via Waveshare BSP, LVGL "Hello World" — **adapted for IDF v6.0**
 3. ✅ C6 SDIO link — `esp_hosted_connect_to_slave()` works. Managed components fetched.
-4. ❌ C6 BT controller init — `esp_hosted_bt_controller_init()` fails: C6 factory firmware has no BT support (Req_FeatureControl timeout). C6 needs reflash with BT-enabled slave firmware.
+4. ❌ C6 BT controller init — `esp_hosted_bt_controller_init()` fails: RPC protocol version mismatch (host 2.12.0 vs C6 firmware 0.0.0). C6 capabilities (`0xd`) confirm HCI+BLE supported — needs firmware update to match host RPC protocol.
 5. ⏸ BLE NUS service — Code written (ble_nus.c/h), blocked on #4
 6. ❌ Port `data.h` — deferred
 7. ❌ Display "Connected / Idle" status — deferred
