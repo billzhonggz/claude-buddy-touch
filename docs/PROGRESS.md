@@ -1,7 +1,7 @@
 # Porting Progress — Claude Desktop Buddy → ESP32-P4
 
 > **Updated**: 2026-04-28
-> **Status**: Phase 1 (Foundation) — Tasks 1-3 complete, display functional. BLE unblocked via managed components.
+> **Status**: Phase 1 (Foundation) — Tasks 1-3 complete, display functional. Task 4 code written but blocked: C6 factory firmware does not respond to BT feature control RPC (Req_FeatureControl timeout). BLE requires C6 firmware with BT support compiled in.
 
 ---
 
@@ -58,39 +58,34 @@ The BSP from Waveshare examples was written for IDF 5.x. These changes were need
 | 1. Project skeleton | ✅ Done | CMakeLists, partitions, sdkconfig, idf_component.yml |
 | 2. BSP component | ✅ Done | Waveshare BSP adapted for IDF v6.0 |
 | 3. Display via LVGL | ✅ Done | Shows "Claude Buddy Touch / Connecting..." |
-| 4. C6 hosted setup | ✅ Unblocked | `esp_hosted` v2 + `esp_wifi_remote` via managed components compatible with IDF v6.0 |
-| 5. BLE NUS service | ⏸ Pending | NimBLE host-only + Hosted HCI VHCI over SDIO (pattern from esp-hosted-mcu `host_nimble_bleprph_host_only_vhci`) |
+| 4. C6 hosted setup (code) | ✅ Done | `ble_nus.c/h` written. Managed components fetched (esp_hosted 2.12.6, esp_wifi_remote). Builds clean. |
+| 4b. C6 BT controller init | ❌ Blocked | `esp_hosted_bt_controller_init()` fails: C6 factory firmware times out on `Req_FeatureControl` (RPC 0x183). C6 needs reflash with BT-enabled slave firmware. |
+| 5. BLE NUS service | ⏸ Blocked by Task 4b | NUS GATT service pattern from `host_nimble_bleprph_host_only_vhci` example — ready but needs working BT controller |
 | 6. data.h port | ⏸ Pending | |
 | 7. State display | ⏸ Pending | |
 | 8. Touch stub | ⏸ Pending | |
 | 9. Integration | ⏸ Pending | |
 
-### BLE Resolution
+### BLE Implementation Status
 
-**Unblocked 2026-04-28.** Research confirmed that `esp_hosted` v2+ and `esp_wifi_remote` 0.14+ **are compatible with IDF v6.0** via managed components:
+**SDIO link:** ✅ Working. `esp_hosted_connect_to_slave()` succeeds — C6 communicates over SDIO.
 
-- **IDF v6.0 iperf example** (`examples/wifi/iperf/`) and **station example** (`examples/wifi/getting_started/station/`) both officially list ESP32-P4 as supported target, using:
-  - `espressif/esp_wifi_remote: ">=0.10,<2.0"`
-  - `espressif/esp_hosted: "~2"`
+**BT controller init:** ❌ Fails. `esp_hosted_bt_controller_init()` sends `Req_FeatureControl` (RPC 0x183) to C6, which times out. Root cause: C6 factory ESP-Hosted slave firmware was compiled without BT support (`#if CONFIG_BT_ENABLED` guarded code in `slave_bt.c` is not compiled in).
 
-- **Waveshare WiFi example** (`04_wifistation`) already uses `esp_hosted 1.4.*` + `esp_wifi_remote 0.14.*` and works — proving Waveshare's C6 SDIO wiring is correct.
+**Evidence from managed component sources:**
+- `slave/main/slave_bt.c:11-13` — Entire BT handler is `#if CONFIG_BT_ENABLED`
+- `slave/main/Kconfig.projbuild:7-10` — `ESP_HOSTED_CP_BT` default depends on `SOC_BT_SUPPORTED`
+- `slave/sdkconfig.defaults.esp32c6:7-10` — Default slave config for C6 does include `CONFIG_BT_ENABLED=y` and `CONFIG_BT_LE_HCI_INTERFACE_USE_RAM=y`
+- Factory firmware on the Waveshare board was likely built with a minimal config that omits BT
 
-- **ESP-Hosted-MCU** provides `host_nimble_bleprph_host_only_vhci` example — exact pattern for P4+C6 BLE using NimBLE host + Hosted HCI (VHCI) over shared SDIO. C6 factory firmware supports "HCI over SDIO" + "BLE only".
-
-- **P4 SOC architecture**: `SOC_WIRELESS_HOST_SUPPORTED=1` (no native WiFi/BT), `esp_phy` is empty stub. All RF handled by C6.
-
-**Implementation approach (successor to previous blocking):**
-1. Add `esp_hosted` + `esp_wifi_remote` to `main/idf_component.yml` (matching IDF v6.0 pattern)
-2. Enable `CONFIG_BT_ENABLED=y`, `CONFIG_BT_CONTROLLER_DISABLED=y`, `CONFIG_BT_NIMBLE_ENABLED=y`
-3. Enable `CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y` + `CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y`
-4. In `app_main()`: `esp_hosted_connect_to_slave()` → `esp_hosted_bt_controller_init()` → `esp_hosted_bt_controller_enable()` → `nimble_port_init()`
-5. Standard NimBLE NUS GATT service with Claude protocol UUIDs
-6. No custom C6 flashing needed — C6 pre-flashed from factory
+**Fix path:** Reflash C6 with ESP-Hosted slave firmware built from the managed component sources with `CONFIG_BT_ENABLED=y`. Either:
+1. **OTA from P4 over SDIO** using `esp_hosted_slave_ota_begin/write/end/activate()` — no wiring changes needed
+2. **Direct UART flash** by connecting to C6 UART pins
 
 **Sources:**
 - `examples/wifi/iperf/main/idf_component.yml` — canonical managed component versions for P4
-- `esp-hosted-mcu/examples/host_nimble_bleprph_host_only_vhci/` — exact code pattern to follow
-- `esp-hosted-mcu/docs/bluetooth_design.md` — Hosted HCI architecture documentation
+- `managed_components/espressif__esp_hosted/examples/host_nimble_bleprph_host_only_vhci/` — reference example with correct init sequence
+- `managed_components/espressif__esp_hosted/slave/` — C6 slave firmware source (build with `CONFIG_BT_ENABLED=y`)
 - `components/soc/esp32p4/include/soc/soc_caps.h:53` — `SOC_WIRELESS_HOST_SUPPORTED`
 - `components/esp_phy/CMakeLists.txt:7-11` — empty PHY for P4 (IDF-7460)
 

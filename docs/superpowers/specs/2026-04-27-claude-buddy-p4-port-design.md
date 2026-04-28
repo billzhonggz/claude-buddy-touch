@@ -215,13 +215,15 @@ No memory concerns — the P4 has orders of magnitude more RAM than the original
 
 ## 8. Phased Implementation
 
-### Phase 1: Foundation ✅ (partial)
+### Phase 1: Foundation ⏸ (blocked on C6 firmware)
 1. ✅ ESP-IDF project with correct CMakeLists, sdkconfig, partitions
 2. ✅ Display + touch init via Waveshare BSP, LVGL "Hello World" — **adapted for IDF v6.0**
-3. ✅ C6 BLE — unblocked via `esp_hosted` v2 + `esp_wifi_remote` managed components. C6 runs ESP-Hosted slave firmware (pre-flashed). P4 runs NimBLE host + Hosted HCI VHCI over SDIO.
-4. ❌ Port `data.h` — deferred
-5. ❌ Display "Connected / Idle" status — deferred
-6. ❌ Idle timeout → screen dimming — deferred
+3. ✅ C6 SDIO link — `esp_hosted_connect_to_slave()` works. Managed components fetched.
+4. ❌ C6 BT controller init — `esp_hosted_bt_controller_init()` fails: C6 factory firmware has no BT support (Req_FeatureControl timeout). C6 needs reflash with BT-enabled slave firmware.
+5. ⏸ BLE NUS service — Code written (ble_nus.c/h), blocked on #4
+6. ❌ Port `data.h` — deferred
+7. ❌ Display "Connected / Idle" status — deferred
+8. ❌ Idle timeout → screen dimming — deferred
 
 ### Phase 2: State Machine + Interaction
 1. Persona state machine (7 states)

@@ -58,28 +58,15 @@ Advertises as `Claude-XXXX`. LE Secure Connections with passkey entry.
 
 ## Porting Status
 
-**Phase 1 (Foundation):** Tasks 1-3 complete. Display shows "Claude Buddy Touch / Connecting...".
-- BLE is the main blocker — no `esp_hosted` / `esp_wifi_remote` on IDF v6.0.
-- Options: downgrade to IDF v5.4, flash standalone C6 NUS firmware over UART/SDIO, or test via USB serial.
-- No IMU — idle timeout replaces face-down nap detection.
+**Phase 1 (Foundation):** Tasks 1-3 complete. Task 4 code complete but runtime blocked.
 
-## Porting Status (Updated 2026-04-28)
+**BLE Status:** SDIO link to C6 works (`esp_hosted_connect_to_slave()` succeeds), but `esp_hosted_bt_controller_init()` fails because the C6 factory ESP-Hosted slave firmware does not include BT support (Req_FeatureControl timeout). The C6 needs to be reflashed with BT-enabled slave firmware. See `docs/PROGRESS.md` for full details.
 
-**Phase 1 (Foundation):** Tasks 1-3 complete. Task 4 (BLE) **unblocked**.
+**SDK config** includes: `BT_ENABLED`, `BT_CONTROLLER_DISABLED`, `BT_NIMBLE_ENABLED`, `ESP_HOSTED_ENABLE_BT_NIMBLE`, `ESP_HOSTED_NIMBLE_HCI_VHCI`.
 
-**BLE is now unblocked.** `esp_hosted` v2+ and `esp_wifi_remote` via managed components are compatible with IDF v6.0. See:
-- `docs/PROGRESS.md` — full BLE resolution details and sources
-- `docs/superpowers/specs/2026-04-27-claude-buddy-p4-port-design.md` — updated architecture
-- `docs/superpowers/plans/2026-04-27-claude-buddy-p4-phase1-foundation.md` — updated Task 4-9 plan with implementation details
+**BLE code pattern:** Follows `managed_components/espressif__esp_hosted/examples/host_nimble_bleprph_host_only_vhci/main/main.c`
 
-**Key BLE approach:**
-- Add `espressif/esp_hosted ~2` and `espressif/esp_wifi_remote >=0.10,<2.0` to `main/idf_component.yml`
-- Enable BT sdkconfig: `BT_ENABLED`, `BT_CONTROLLER_DISABLED`, `BT_NIMBLE_ENABLED`, etc.
-- Enable Hosted BT: `CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y`, `CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y`
-- `app_main()` flow: `esp_hosted_connect_to_slave()` → `esp_hosted_bt_controller_init()` → `esp_hosted_bt_controller_enable()` → standard NimBLE init → NUS GATT service → advertise as `Claude-XXXX`
-- Pattern: `esp-hosted-mcu/examples/host_nimble_bleprph_host_only_vhci/`
-- Reference: IDf v6.0 `examples/wifi/iperf/main/idf_component.yml` for managed component versions
-- No C6 reflash needed (pre-flashed from factory)
+**C6 firmware fix:** Reflash C6 with ESP-Hosted slave firmware from `managed_components/espressif__esp_hosted/slave/` built with `CONFIG_BT_ENABLED=y`. Options: SDIO OTA from P4, or direct UART flash.
 
 ## Key Design Choices
 

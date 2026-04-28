@@ -1,6 +1,6 @@
 # Phase 1: Foundation — Display, BLE, JSON Parsing
 
-> **Last updated**: 2026-04-28 — Tasks 1-3 complete with IDF v6.0 adaptations, BLE unblocked
+> **Last updated**: 2026-04-28 — Tasks 1-3 complete, Task 4 code written (ble_nus.c/h) but BLE initialization blocked: C6 factory firmware does not respond to BT feature control RPC over SDIO
 
 **Goal:** Boot ESP32-P4, initialize display + LVGL, connect BLE via C6, receive JSON heartbeat from desktop, display "Connected / idle" status on screen.
 
@@ -110,18 +110,11 @@ claude-buddy-touch/
 
 ---
 
-## Pending Tasks (Updated 2026-04-28)
+## Completed Tasks
 
-### Task 4: C6 BLE via esp_hosted + NimBLE Host
+### Task 4: C6 BLE via esp_hosted + NimBLE Host (code complete, runtime blocked)
 
-**Status:** ✅ Unblocked — `esp_hosted` v2+ and `esp_wifi_remote` 0.14+ are compatible with IDF v6.0 via managed components.
-
-**Architecture:**
-```
-P4 (NimBLE host) ←→ [Hosted HCI VHCI] ←→ [SDIO transport] ←→ C6 (ESP-Hosted slave firmware, pre-flashed) → BLE radio
-```
-
-**Files to create:**
+**Files created:**
 - `main/ble_nus.h` — BLE NUS service declarations, Claude protocol GATT service UUIDs
 - `main/ble_nus.c` — NimBLE host initialization, GATT server with NUS service, passkey handler, connection callbacks
 
@@ -137,41 +130,29 @@ CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y
 CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y
 ```
 
-**idf_component.yml changes:**
-```yaml
-dependencies:
-  lvgl/lvgl: "^9.2"
-  espressif/esp_wifi_remote:
-    version: ">=0.10,<2.0"
-    rules:
-      - if: "target in [esp32p4, esp32h2]"
-  espressif/esp_hosted:
-    version: "~2"
-    rules:
-      - if: "target in [esp32p4, esp32h2]"
-  idf:
-    version: ">=5.4.0"
-```
+**idf_component.yml:** Added `espressif/esp_hosted: "~2"` and `espressif/esp_wifi_remote: ">=0.10,<2.0"` (with `target in [esp32p4, esp32h2]` rules, matching IDF v6.0 iperf example pattern).
 
 **app_main() flow:**
 1. NVS init
 2. Display init
-3. `esp_hosted_connect_to_slave()` — initialize SDIO link to C6
-4. Optionally: `esp_hosted_get_coprocessor_fwversion()` — verify C6 firmware
-5. `esp_hosted_bt_controller_init()` — init BT controller on C6
-6. `esp_hosted_bt_controller_enable()` — enable BT controller
-7. `nimble_port_init()` — init NimBLE host
-8. Configure NimBLE: `ble_hs_cfg`, GATT services, device name "Claude-XXXX"
-9. `nimble_port_freertos_init()` — start NimBLE host task
-10. Advertise NUS service
+3. `esp_hosted_connect_to_slave()` — SDIO link: ✅ works
+4. `esp_hosted_get_coprocessor_fwversion()` — verify C6 firmware: ✅ works
+5. `esp_hosted_get_cp_info()` — verify C6 chip: ✅ works
+6. `esp_hosted_get_coprocessor_app_desc()` — full firmware info: ✅ works
+7. `esp_hosted_bt_controller_init()` — **❌ FAILS**: `rpc_core: Timeout waiting for Resp for [0x183](Req_FeatureControl)`
+8. `esp_hosted_bt_controller_enable()` — not reached
 
-**Code pattern:** Follow `esp-hosted-mcu/examples/host_nimble_bleprph_host_only_vhci/main/main.c`
+**Code pattern:** Followed `managed_components/espressif__esp_hosted/examples/host_nimble_bleprph_host_only_vhci/main/main.c`
 
-**Verification:** Scan for "Claude-XXXX" advertising using nRF Connect or Claude Desktop.
+**Root cause:** C6 factory ESP-Hosted slave firmware does not include BT support. The `Req_FeatureControl` RPC command (0x183) times out because the slave-side BT handler (`slave_bt.c`) is guarded by `#if CONFIG_BT_ENABLED` and was not compiled into the factory firmware image.
+
+**Fix options:**
+1. Flash C6 with BT-enabled slave firmware via SDIO OTA (`esp_hosted_slave_ota_begin/write/end/activate`)
+2. Flash C6 directly via UART
 
 ### Task 5: BLE NUS Service
 
-**Status:** ⏸ Pending (follows Task 4)
+**Status:** ⏸ Blocked by Task 4 (needs working BT controller on C6)
 
 **Implementation:**
 - GATT NUS service with UUID `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
