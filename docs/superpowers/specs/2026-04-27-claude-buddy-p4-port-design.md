@@ -184,7 +184,7 @@ Removed: shake detection (no IMU), face-down nap (replaced by idle timeout).
 
 ## 6. BLE Protocol (NUS on C6)
 
-Identical UUIDs and protocol as REFERENCE.md:
+Identical UUIDs and protocol as [`docs/REFERENCE.md`](../../REFERENCE.md):
 - Service: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
 - RX (write): `6e400002-b5a3-f393-e0a9-e50e24dcca9e`
 - TX (notify): `6e400003-b5a3-f393-e0a9-e50e24dcca9e`
