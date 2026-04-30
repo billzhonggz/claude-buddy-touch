@@ -1,7 +1,7 @@
 # Porting Progress — Claude Desktop Buddy → ESP32-P4
 
-> **Updated**: 2026-04-28
-> **Status**: Phase 1 (Foundation) — Tasks 1-3 complete, display functional. Task 4 code written, BLE init blocked by RPC version mismatch between P4 host (2.12.0) and C6 coprocessor firmware (reported as 0.0.0). C6 needs firmware update to match host's RPC protocol.
+> **Updated**: 2026-04-30
+> **Status**: Phase 1 (Foundation) — Tasks 1-3, 6-9 complete. Display shows animated ASCII buddy, session status, and demo mode (tap to cycle 5 scenarios). BLE (Tasks 4-5) blocked by C6 firmware RPC version mismatch — waiting on C6 flash tools.
 
 ---
 
@@ -24,7 +24,13 @@ Porting the [claude-desktop-buddy](https://github.com/anthropics/claude-desktop-
 
 - **Project skeleton** — ESP-IDF project, partitions, sdkconfig
 - **BSP component** — MIPI DSI display init, touch, backlight, I2C, SD card (adapted for IDF v6.0)
-- **LVGL display** — 480×800 screen shows "Claude Buddy Touch / Connecting..." text
+- **LVGL display** — 480×800 full-screen with status bar, ASCII buddy art, session info
+- **Touch input** — GT911 capacitive touch via BSP, gesture detection (tap advances demo, long-press toggles demo)
+- **Demo mode** — Auto-cycles through 5 Claude scenarios (asleep, idle, busy, attention, completed) every 8s
+- **JSON parsing** — cJSON-based data layer with TamaState, demo mode, BLE feed buffer
+- **State machine** — PersonaState derivation (idle, busy, attention, celebrate) from session data
+- **ASCII buddy** — Capybara-style ASCII art animating per persona state (7 expressions)
+- **BLE NUS code** — Written and compiles; runtime blocked on C6 firmware update
 
 ---
 
@@ -48,6 +54,8 @@ The BSP from Waveshare examples was written for IDF 5.x. These changes were need
 | Disabled task watchdog | Initial LVGL full-screen flush exceeds timeout |
 | `SOC_WIRELESS_HOST_SUPPORTED=1` not `SOC_WIFI_SUPPORTED` | P4 has no native WiFi — C6 handles all RF |
 | `esp_phy` component is empty stub on P4 | P4 has no radio hardware |
+| cJSON removed from base | Now a managed component: `espressif/cjson: "^1.7.19~2"` |
+| cJSON include changed | `#include "cJSON.h"` via `espressif__cjson` managed component include dirs |
 
 ---
 
@@ -57,41 +65,22 @@ The BSP from Waveshare examples was written for IDF 5.x. These changes were need
 |------|--------|-------|
 | 1. Project skeleton | ✅ Done | CMakeLists, partitions, sdkconfig, idf_component.yml |
 | 2. BSP component | ✅ Done | Waveshare BSP adapted for IDF v6.0 |
-| 3. Display via LVGL | ✅ Done | Shows "Claude Buddy Touch / Connecting..." |
-| 4. C6 hosted setup (code) | ✅ Done | `ble_nus.c/h` written. Managed components fetched (esp_hosted 2.12.6, esp_wifi_remote). Builds clean. |
-| 4b. C6 BT controller init | ❌ Blocked | `esp_hosted_bt_controller_init()` fails: C6 factory firmware times out on `Req_FeatureControl` (RPC 0x183). C6 needs reflash with BT-enabled slave firmware. |
-| 5. BLE NUS service | ⏸ Blocked by Task 4b | NUS GATT service pattern from `host_nimble_bleprph_host_only_vhci` example — ready but needs working BT controller |
-| 6. data.h port | ⏸ Pending | |
-| 7. State display | ⏸ Pending | |
-| 8. Touch stub | ⏸ Pending | |
-| 9. Integration | ⏸ Pending | |
+| 3. Display via LVGL | ✅ Done | Shows animated ASCII buddy + status |
+| 4. C6 hosted setup (code) | ✅ Done | `ble_nus.c/h` written. Managed components fetched. |
+| 4b. C6 BT controller init | ❌ Blocked | C6 firmware needs reflash to match ESP-Hosted 2.12.0 |
+| 5. BLE NUS service | ⏸ Blocked by Task 4b | Ready, needs working BT controller |
+| 6. **data.h port** | ✅ **Done** | cJSON-based JSON parsing, TamaState, demo mode, BLE line buffer |
+| 7. **State display** | ✅ **Done** | Dynamic status: Connecting/Connected/Idle/Active with colored dot |
+| 8. **Touch stub** | ✅ **Done** | Tap (advance demo), long-press (toggle demo) |
+| 9. **Integration** | ✅ **Done** | State-driven app task, demo mode, BLE fallback |
 
 ### BLE Implementation Status
 
-**SDIO link:** ✅ Working. `esp_hosted_connect_to_slave()` succeeds. Full transport layer established.
+**SDIO link:** ✅ Working. `esp_hosted_connect_to_slave()` succeeds.
 
-**C6 capabilities:** The C6 reports `capabilities: 0xd` = WLAN + HCI over SDIO + BLE only. The hardware/firmware is capable of BLE. Additionally, `vhci_drv: Host BT Support: Enabled, BT Transport Type: VHCI` confirms the P4-side VHCI driver is ready.
+**C6 capabilities:** C6 reports `capabilities: 0xd` = WLAN + HCI over SDIO + BLE only. `vhci_drv: Host BT Support: Enabled, BT Transport Type: VHCI` confirms P4-side VHCI driver is ready.
 
-**BT controller init:** ❌ Fails. `esp_hosted_bt_controller_init()` sends `Req_FeatureControl` (RPC 0x183) to C6, which times out.
-
-**Root cause (from boot log):** RPC protocol version mismatch.
-```
-Version mismatch: Host [2.12.0] > Co-proc [0.0.0] ==> Upgrade co-proc to avoid RPC timeouts
-```
-The P4 host runs ESP-Hosted 2.12.0, but the C6 factory firmware reports version 0.0.0 — its version reporting scheme is incompatible with the host's versioning. The `Req_FeatureControl` RPC command (added in a later ESP-Hosted protocol version) is not recognized by the older C6 firmware, causing the timeout.
-
-**Note:** This is NOT a BT-disabled firmware build. The C6 capabilities clearly include HCI and BLE. The issue is purely an RPC protocol version compatibility problem.
-
-**Fix path:** Update C6 firmware to match the host ESP-Hosted version. Options:
-1. **SDIO OTA from P4** using `esp_hosted_slave_ota_begin/write/end/activate()` — no wiring changes, requires building slave firmware from managed component sources
-2. **Direct UART flash** of C6 with ESP-Hosted slave firmware built from `managed_components/espressif__esp_hosted/slave/`
-
-**Sources:**
-- `examples/wifi/iperf/main/idf_component.yml` — canonical managed component versions for P4
-- `managed_components/espressif__esp_hosted/examples/host_nimble_bleprph_host_only_vhci/` — reference example with correct init sequence
-- `managed_components/espressif__esp_hosted/slave/` — C6 slave firmware source (build with `CONFIG_BT_ENABLED=y`)
-- `components/soc/esp32p4/include/soc/soc_caps.h:53` — `SOC_WIRELESS_HOST_SUPPORTED`
-- `components/esp_phy/CMakeLists.txt:7-11` — empty PHY for P4 (IDF-7460)
+**BT controller init:** ❌ Fails — RPC protocol version mismatch (host 2.12.0 vs C6 0.0.0).
 
 ---
 
@@ -104,18 +93,24 @@ claude-buddy-touch/
 ├── sdkconfig.defaults                   # IDF config defaults
 ├── main/
 │   ├── CMakeLists.txt                   # Main component build
-│   ├── idf_component.yml                # Dependencies (lvgl + esp_hosted + esp_wifi_remote)
-│   ├── main.c                           # app_main entry
-│   ├── display.c/h                      # LVGL display init + hello screen
-│   │   └── display.h
-│   ├── ble_nus.c/h                      # BLE NUS service (planned)
-│   ├── uart_driver.c                    # HCI UART transport (if using UART fallback)
-│   └── data.h                           # JSON parsing + TamaState (planned)
+│   ├── idf_component.yml                # Dependencies (lvgl, cjson, esp_hosted)
+│   ├── main.c                           # App task, state machine, touch + demo loop
+│   ├── display.c/h                      # LVGL screen: buddy art, status labels
+│   ├── tama_state.h                     # TamaState struct definition
+│   ├── data.h                           # JSON parsing, demo mode, BLE buffer (header-only)
+│   ├── touch.c/h                        # Gesture detection (tap, long-press)
+│   ├── ble_nus.c/h                      # BLE NUS service (blocked, compiles)
 ├── components/
 │   └── esp32_p4_wifi6_touch_lcd_4_3/    # Waveshare BSP (patched for IDF v6.0)
+├── managed_components/
+│   ├── espressif__cjson/                # cJSON managed component
+│   ├── espressif__esp_hosted/           # ESP-Hosted SDIO transport
+│   ├── espressif__esp_wifi_remote/      # WiFi remote library
+│   ├── espressif__esp_lcd_st7701/       # ST7701 display driver
+│   ├── espressif__esp_lcd_touch/        # Touch abstraction
+│   ├── espressif__esp_lcd_touch_gt911/  # GT911 touch driver
+│   └── lvgl__lvgl/                      # LVGL v9.4
 ├── docs/
-│   ├── PORTING.md                       # Porting technical reference
-│   ├── REFERENCE.md                     # BLE protocol spec
 │   ├── PROGRESS.md                      # This file
 │   └── superpowers/
 │       ├── specs/

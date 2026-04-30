@@ -1,12 +1,12 @@
 # Phase 1: Foundation — Display, BLE, JSON Parsing
 
-> **Last updated**: 2026-04-28 — Tasks 1-3 complete, Task 4 code written (ble_nus.c/h) but BLE initialization blocked by RPC version mismatch: P4 host ESP-Hosted 2.12.0 vs C6 coprocessor firmware reporting 0.0.0
+> **Last updated**: 2026-04-30 — Tasks 1-3, 6-9 complete. Demo mode working with ASCII buddy, touch cycling, and session status. BLE (Tasks 4-5) blocked by C6 firmware RPC version mismatch.
 
 **Goal:** Boot ESP32-P4, initialize display + LVGL, connect BLE via C6, receive JSON heartbeat from desktop, display "Connected / idle" status on screen.
 
 **Architecture:** ESP-IDF v6.0 project targeting `esp32p4`, using the Waveshare board-specific BSP component (`esp32_p4_wifi6_touch_lcd_4_3`) for MIPI DSI display + touch init. LVGL initialized directly (bypassed `esp_lvgl_adapter` which is incompatible with IDF v6.0). BLE via `esp_hosted` v2 + `esp_wifi_remote` managed components — C6 runs ESP-Hosted slave firmware (pre-flashed), P4 runs NimBLE host with Hosted HCI VHCI over shared SDIO (pattern from `esp-hosted-mcu/examples/host_nimble_bleprph_host_only_vhci`).
 
-**Tech Stack:** ESP-IDF 6.0, LVGL v9.4, Waveshare BSP (board-specific, IDF-v6.0-adapted), cJSON, FreeRTOS
+**Tech Stack:** ESP-IDF 6.0, LVGL v9.4, Waveshare BSP (board-specific, IDF-v6.0-adapted), cJSON (managed component `espressif/cjson`), FreeRTOS
 
 ---
 
@@ -19,12 +19,16 @@ claude-buddy-touch/
 ├── sdkconfig.defaults              # ESP-IDF config defaults for esp32p4
 ├── main/
 │   ├── CMakeLists.txt              # Main component build
-│   ├── idf_component.yml           # Dependencies (lvgl + esp_hosted + esp_wifi_remote)
-│   ├── main.c                      # app_main, display init, hello screen
-│   ├── display.c                   # LVGL display init via BSP
-│   ├── display.h                   # Display API
-│   ├── ble_nus.c                   # BLE NUS service (planned)
-│   └── ble_nus.h                   # BLE NUS header (planned)
+│   ├── idf_component.yml           # Dependencies (lvgl, cjson, esp_hosted, esp_wifi_remote)
+│   ├── main.c                      # app_main, app task, state machine, touch loop
+│   ├── display.c                   # LVGL display: buddy art, status labels
+│   ├── display.h                   # Display API + PersonaState enum
+│   ├── tama_state.h                # TamaState struct definition
+│   ├── data.h                      # JSON parsing (cJSON), demo mode, BLE buffer
+│   ├── touch.c                     # Gesture detection (tap, long-press)
+│   ├── touch.h                     # Touch event types and API
+│   ├── ble_nus.c                   # BLE NUS service (blocked, compiles)
+│   └── ble_nus.h                   # BLE NUS header
 ├── components/
 │   └── esp32_p4_wifi6_touch_lcd_4_3/   # Board BSP (adapted for IDF v6.0)
 └── docs/
@@ -45,7 +49,7 @@ claude-buddy-touch/
 - `CMakeLists.txt` — ESP-IDF project boilerplate
 - `partitions.csv` — nvs(0x9000/0x6000), phy_init(0xF000/0x1000), factory(0x10000/0x1000000), storage(0xFB0000)
 - `sdkconfig.defaults` — P4 target with SPIRAM, LVGL, perf optimization, 360MHz CPU, BT+HCI configs
-- `main/idf_component.yml` — lvgl/lvgl ^9.2 + esp_hosted ~2 + esp_wifi_remote (matching IDF v6.0 iperf example pattern)
+- `main/idf_component.yml` — lvgl/lvgl ^9.2 + esp_hosted ~2 + esp_wifi_remote + espressif/cjson
 
 **Key sdkconfig settings:**
 - `CONFIG_IDF_TARGET="esp32p4"`, `CONFIG_ESPTOOLPY_FLASHSIZE_32MB`
@@ -54,7 +58,7 @@ claude-buddy-touch/
 - `CONFIG_ESP_TASK_WDT_EN=n` (disabled — full-screen LVGL flush exceeds watchdog timeout)
 - `CONFIG_BT_ENABLED=y`, `CONFIG_BT_CONTROLLER_DISABLED=y`, `CONFIG_BT_NIMBLE_ENABLED=y`
 - `CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y`, `CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y`
-- LVGL: fonts 12-28, compressed, FreeRTOS integration, 15ms refresh
+- LVGL: fonts 12-28+36, compressed, FreeRTOS integration, 15ms refresh
 
 ---
 
@@ -96,12 +100,11 @@ claude-buddy-touch/
 ### Task 3: Display "Hello" via LVGL ✅
 
 **Files:**
-- `main/display.h` — `display_init()`, `display_lock/unlock()`, `display_show_hello()`
-- `main/display.c` — calls `bsp_display_start()` + `bsp_display_backlight_on()`
-- `main/main.c` — NVS init → display init → hello screen → returns
-- `main/CMakeLists.txt` — registers main.c + display.c, REQUIRES esp32_p4_wifi6_touch_lcd_4_3 + nvs_flash
+- `main/display.h` — `display_init()`, `display_lock/unlock()`, `display_show_hello()`, `display_update()`
+- `main/display.c` — calls `bsp_display_start()` + `bsp_display_backlight_on()`, persistent UI labels + ASCII buddy
+- `main/main.c` — NVS init → display init → hello screen → app task
 
-**Result:** Screen shows "Claude Buddy Touch / Connecting..." centered on black background.
+**Result:** Screen shows animated ASCII buddy with connection status, session counts, and persona state.
 
 **Debugging journey:**
 1. `assert failed: esp_clk_init clk.c:104 (res)` — CPU freq 400MHz invalid for P4 v1.3 → fixed to 360MHz
@@ -130,65 +133,57 @@ CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y
 CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y
 ```
 
-**idf_component.yml:** Added `espressif/esp_hosted: "~2"` and `espressif/esp_wifi_remote: ">=0.10,<2.0"` (with `target in [esp32p4, esp32h2]` rules, matching IDF v6.0 iperf example pattern).
-
 **app_main() flow:**
 1. NVS init
 2. Display init
 3. `esp_hosted_connect_to_slave()` — SDIO link: ✅ works
 4. `esp_hosted_get_coprocessor_fwversion()` — verify C6 firmware: ✅ works
 5. `esp_hosted_get_cp_info()` — verify C6 chip: ✅ works
-6. `esp_hosted_get_coprocessor_app_desc()` — full firmware info: ✅ works
-7. `esp_hosted_bt_controller_init()` — **❌ FAILS**: `rpc_core: Timeout waiting for Resp for [0x183](Req_FeatureControl)`
-8. `esp_hosted_bt_controller_enable()` — not reached
+6. `esp_hosted_bt_controller_init()` — **❌ FAILS**: RPC protocol mismatch
+7. `esp_hosted_bt_controller_enable()` — not reached
 
-**Code pattern:** Followed `managed_components/espressif__esp_hosted/examples/host_nimble_bleprph_host_only_vhci/main/main.c`
+### Task 5: BLE NUS Service ⏸
 
-**Root cause (from boot log):** RPC protocol version mismatch. P4 host is ESP-Hosted 2.12.0; C6 reports version 0.0.0 (incompatible versioning scheme). The `Req_FeatureControl` RPC command (0x183) was added after the C6 firmware's protocol version and is not recognized. The C6 capabilities (`0xd` = WLAN + HCI over SDIO + BLE only) confirm BT is supported — it's purely a version compatibility issue.
+Blocked by Task 4.
 
-**Fix options:**
-1. Update C6 firmware to match host ESP-Hosted protocol version via SDIO OTA (`esp_hosted_slave_ota_begin/write/end/activate`)
-2. Flash C6 directly via UART with ESP-Hosted slave firmware built from managed component sources
+### Task 6: data.h JSON Parser Port ✅
 
-### Task 5: BLE NUS Service
-
-**Status:** ⏸ Blocked by Task 4 (needs working BT controller on C6)
-
-**Implementation:**
-- GATT NUS service with UUID `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
-- RX characteristic: `6e400002-b5a3-f393-e0a9-e50e24dcca9e` (write, desktop→device)
-- TX characteristic: `6e400003-b5a3-f393-e0a9-e50e24dcca9e` (notify, device→desktop)
-- LE Secure Connections with passkey display (DisplayOnly I/O capability)
-- Device name: `Claude-XXXX` (random 4 hex chars from MAC)
-- Connection callback updates LVGL status display
-
-### Task 6: data.h JSON Parser Port
-
-**Status:** ⏸ Pending
+**Files:**
+- `main/tama_state.h` — TamaState struct definition (shared struct)
+- `main/data.h` — Header-only data layer (included only from main.c)
 
 **Port changes from original:**
-- Replace ArduinoJson → cJSON
-- Replace `M5.Rtc` refs → `time_t`
-- Remove `M5.Imu` dependency
-- Replace `Serial` → UART buffer from BLE NUS RX callback
+- ArduinoJson → cJSON (managed component `espressif/cjson`)
+- `M5.Rtc` refs → `time_t` stored in static variable
+- Removed `M5.Imu` dependency
+- `Serial` BLE polling → `data_feed_byte()` / `data_feed()` called from BLE RX callback
+- `millis()` → `esp_timer_get_time() / 1000`
+- Arduino `Stream` line buffer → simple char buffer with `\n`/`\r` detection
+- Demo mode: 5 scenarios auto-cycling every 8 seconds
 
-### Task 7: Display "Connected/Idle" Status
+### Task 7: Display "Connected/Idle" Status ✅
 
-**Status:** ⏸ Pending
+- Dynamic LVGL labels updated at 20fps via `display_update()`
+- Connection dot color: red (disconnected), blue (connected), green (active), yellow (prompt)
+- Status text: "Connecting...", "Connected", "Idle", "Active", "Prompt waiting!"
+- ASCII buddy art (capybara-style) rendered with `lv_font_montserrat_28`, centered, state-driven expressions
+- Session counts, message, tokens, and persona state labels
 
-- LVGL label updates based on BLE connection state from Task 5 callbacks
-- States: "Connecting...", "Connected", "Idle" (no sessions), "Active" (with sessions)
+### Task 8: Touch Input Stub ✅
 
-### Task 8: Touch Input Stub
+**Files:**
+- `main/touch.h` — touch_event_t enum, touch_event_data_t struct
+- `main/touch.c` — gesture detection using `bsp_display_get_input_dev()` LVGL indev
 
-**Status:** ⏸ Pending
+**Gestures:**
+- Tap (<300ms): advance to next demo scenario
+- Long-press (>500ms): toggle demo mode on/off
+- Swipe detection (armed but demo just advances in all directions)
 
-- Touch init already functional via BSP (`bsp_display_start()` → GT911)
-- Stub gesture recognition: tap, long-press
+### Task 9: Integration + Demo Mode ✅
 
-### Task 9: Integration + Demo Mode
-
-**Status:** ⏸ Pending
-
-- Wire all components together: display → BLE → data.h → state machine → display
-- Loop-back test without desktop: BLE advertise, self-connect for demo mode
+- FreeRTOS app task loops at 20fps: `data_poll()` → `derive_state()` → `display_update()`
+- BLE init failure is non-fatal — app runs in standalone demo mode
+- Tap cycles through 5 scenarios (asleep → one idle → busy → attention → completed)
+- Long-press toggles between demo and "Connecting..." (no BLE data) state
+- State machine from `TamaState` to `PersonaState`: idle, busy (≥3 running), attention (≥1 waiting), celebrate (completed)

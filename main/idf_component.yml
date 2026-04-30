@@ -1,5 +1,6 @@
 dependencies:
   lvgl/lvgl: "^9.2"
+  espressif/cjson: "^1.7.19~2"
   espressif/esp_wifi_remote:
     version: ">=0.10,<2.0"
     rules:
