@@ -199,8 +199,8 @@ void display_init(void)
     s_transcript_label = lv_label_create(ui.scr);
     lv_obj_set_style_text_color(s_transcript_label, lv_color_hex(0xCCCCCC), LV_STATE_DEFAULT);
     lv_obj_set_width(s_transcript_label, DISP_W - 20);
-    lv_obj_set_height(s_transcript_label, DISP_H - 100);
-    lv_obj_align(s_transcript_label, LV_ALIGN_TOP_LEFT, 10, 40);
+    lv_obj_set_height(s_transcript_label, DISP_H - 130);
+    lv_obj_align(s_transcript_label, LV_ALIGN_TOP_LEFT, 10, 70);
     lv_label_set_long_mode(s_transcript_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_add_flag(s_transcript_label, LV_OBJ_FLAG_HIDDEN);
 
