@@ -3,22 +3,10 @@
 #include <stdbool.h>
 #include "lvgl.h"
 #include "tama_state.h"
+#include "state_machine.h"
 
 #define DISP_W 480
 #define DISP_H 800
-
-enum PersonaState {
-    P_SLEEP = 0,
-    P_IDLE,
-    P_BUSY,
-    P_ATTENTION,
-    P_CELEBRATE,
-    P_DIZZY,
-    P_HEART,
-    P_COUNT
-};
-
-extern const char* persona_state_names[];
 
 void display_init(void);
 void display_lock(void);

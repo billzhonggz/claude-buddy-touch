@@ -1,12 +1,9 @@
 #include "display.h"
+#include "state_machine.h"
 #include "esp_log.h"
 #include "bsp/esp-bsp.h"
 
 static const char* TAG = "display";
-
-const char* persona_state_names[] = {
-    "sleep", "idle", "busy", "attention", "celebrate", "dizzy", "heart"
-};
 
 static const char* BUDDY[] = {
     [P_SLEEP] =

@@ -7,17 +7,9 @@
 #include "touch.h"
 #include "data.h"
 #include "ble_nus.h"
+#include "state_machine.h"
 
 static const char* TAG = "buddy";
-
-enum PersonaState derive_state(const struct TamaState* s)
-{
-    if (!s->connected)             return P_IDLE;
-    if (s->sessionsWaiting > 0)    return P_ATTENTION;
-    if (s->recentlyCompleted)      return P_CELEBRATE;
-    if (s->sessionsRunning >= 3)   return P_BUSY;
-    return P_IDLE;
-}
 
 static void app_task(void* arg)
 {
@@ -31,8 +23,8 @@ static void app_task(void* arg)
 
     while (1) {
         data_poll(tama);
-        base_state = derive_state(tama);
-        active_state = base_state;
+        base_state = state_machine_derive(tama);
+        active_state = state_machine_update(base_state);
 
         touch_event_data_t touch = touch_process();
         if (touch.event == TOUCH_EVENT_TAP) {
