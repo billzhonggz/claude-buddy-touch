@@ -39,6 +39,14 @@ static void app_task(void* arg)
             s_last_prompt_id[0] = '\0';
         }
 
+        static bool was_connected = true;
+        if (tama->connected != was_connected) {
+            was_connected = tama->connected;
+            if (!tama->connected) {
+                state_machine_trigger_oneshot(P_DIZZY, 2000);
+            }
+        }
+
         touch_event_data_t touch = touch_process();
         if (touch.event == TOUCH_EVENT_TAP) {
             ESP_LOGI(TAG, "Tap at (%u, %u)", touch.x, touch.y);
