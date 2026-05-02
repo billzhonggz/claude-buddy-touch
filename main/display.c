@@ -74,7 +74,14 @@ static struct {
     lv_obj_t* state_label;
     lv_obj_t* prompt;
     lv_obj_t* hint;
+    lv_obj_t* approve_btn;
+    lv_obj_t* approve_lbl;
+    lv_obj_t* deny_btn;
+    lv_obj_t* deny_lbl;
+    lv_obj_t* prompt_area;
     enum PersonaState last_persona;
+    display_approve_cb_t approve_cb;
+    display_deny_cb_t deny_cb;
 } ui;
 
 void display_init(void)
@@ -136,6 +143,36 @@ void display_init(void)
     lv_obj_set_width(ui.prompt, DISP_W - 20);
     lv_obj_set_style_text_color(ui.prompt, lv_color_hex(0xFFCC00), LV_STATE_DEFAULT);
     lv_obj_align(ui.prompt, LV_ALIGN_TOP_LEFT, 10, 480);
+
+    ui.prompt_area = lv_label_create(ui.scr);
+    lv_obj_set_width(ui.prompt_area, DISP_W - 40);
+    lv_obj_set_height(ui.prompt_area, 150);
+    lv_obj_align(ui.prompt_area, LV_ALIGN_TOP_LEFT, 20, 520);
+    lv_obj_set_style_text_color(ui.prompt_area, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+    lv_obj_add_flag(ui.prompt_area, LV_OBJ_FLAG_HIDDEN);
+
+    ui.approve_btn = lv_btn_create(ui.scr);
+    lv_obj_set_size(ui.approve_btn, 200, 60);
+    lv_obj_align(ui.approve_btn, LV_ALIGN_BOTTOM_LEFT, 20, -20);
+    lv_obj_set_style_bg_color(ui.approve_btn, lv_color_hex(0x00AA00), LV_STATE_DEFAULT);
+    lv_obj_add_flag(ui.approve_btn, LV_OBJ_FLAG_HIDDEN);
+
+    ui.approve_lbl = lv_label_create(ui.approve_btn);
+    lv_label_set_text(ui.approve_lbl, "Approve");
+    lv_obj_center(ui.approve_lbl);
+
+    ui.deny_btn = lv_btn_create(ui.scr);
+    lv_obj_set_size(ui.deny_btn, 200, 60);
+    lv_obj_align(ui.deny_btn, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
+    lv_obj_set_style_bg_color(ui.deny_btn, lv_color_hex(0xAA0000), LV_STATE_DEFAULT);
+    lv_obj_add_flag(ui.deny_btn, LV_OBJ_FLAG_HIDDEN);
+
+    ui.deny_lbl = lv_label_create(ui.deny_btn);
+    lv_label_set_text(ui.deny_lbl, "Deny");
+    lv_obj_center(ui.deny_lbl);
+
+    lv_obj_add_event_cb(ui.approve_btn, approve_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(ui.deny_btn, deny_btn_cb, LV_EVENT_CLICKED, NULL);
 
     ui.hint = lv_label_create(ui.scr);
     lv_label_set_text(ui.hint, "Tap: next  Hold: toggle demo  Swipe L/R: screens");
@@ -204,6 +241,46 @@ void display_show_hello(void)
     lv_scr_load(scr);
 
     display_unlock();
+}
+
+static void approve_btn_cb(lv_event_t* e)
+{
+    (void)e;
+    if (ui.approve_cb) ui.approve_cb();
+    display_show_permission(false, NULL, NULL);
+}
+
+static void deny_btn_cb(lv_event_t* e)
+{
+    (void)e;
+    if (ui.deny_cb) ui.deny_cb();
+    display_show_permission(false, NULL, NULL);
+}
+
+void display_set_approve_cb(display_approve_cb_t cb)
+{
+    ui.approve_cb = cb;
+}
+
+void display_set_deny_cb(display_deny_cb_t cb)
+{
+    ui.deny_cb = cb;
+}
+
+void display_show_permission(bool show, const char* tool, const char* hint)
+{
+    if (show && s_mode == DISPLAY_MODE_BUDDY) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "Tool: %s\n\n%s", tool ? tool : "?", hint ? hint : "");
+        lv_label_set_text(ui.prompt_area, buf);
+        lv_obj_clear_flag(ui.prompt_area, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(ui.approve_btn, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(ui.deny_btn, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(ui.prompt_area, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(ui.approve_btn, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(ui.deny_btn, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 void display_show_buddy(const struct TamaState* state, enum PersonaState persona)
@@ -352,6 +429,9 @@ void display_set_mode(enum DisplayMode mode)
     lv_obj_add_flag(ui.tokens, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(ui.state_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(ui.prompt, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui.prompt_area, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui.approve_btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui.deny_btn, LV_OBJ_FLAG_HIDDEN);
 
     if (s_clock_label) lv_obj_add_flag(s_clock_label, LV_OBJ_FLAG_HIDDEN);
     if (s_info_label) lv_obj_add_flag(s_info_label, LV_OBJ_FLAG_HIDDEN);

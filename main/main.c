@@ -1,7 +1,9 @@
 #include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "display.h"
 #include "touch.h"
@@ -21,10 +23,21 @@ static void app_task(void* arg)
     data_set_demo(true);
     ESP_LOGI(TAG, "Demo mode enabled. Touch the screen to interact.");
 
+    static uint32_t s_prompt_arrived_ms = 0;
+    static char s_last_prompt_id[40] = "";
+
     while (1) {
         data_poll(tama);
         base_state = state_machine_derive(tama);
         active_state = state_machine_update(base_state);
+
+        if (tama->promptId[0] && strcmp(tama->promptId, s_last_prompt_id) != 0) {
+            strncpy(s_last_prompt_id, tama->promptId, sizeof(s_last_prompt_id) - 1);
+            s_prompt_arrived_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        }
+        if (!tama->promptId[0]) {
+            s_last_prompt_id[0] = '\0';
+        }
 
         touch_event_data_t touch = touch_process();
         if (touch.event == TOUCH_EVENT_TAP) {
@@ -45,9 +58,46 @@ static void app_task(void* arg)
 
         display_lock();
         display_update(tama, active_state);
+        if (tama->promptId[0] && display_get_mode() == DISPLAY_MODE_BUDDY) {
+            display_show_permission(true, tama->promptTool, tama->promptHint);
+        } else {
+            display_show_permission(false, NULL, NULL);
+        }
         display_unlock();
 
         vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+static void on_approve(void)
+{
+    struct TamaState* s = data_state();
+    if (s->promptId[0]) {
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        char resp[256];
+        snprintf(resp, sizeof(resp),
+                 "{\"cmd\":\"permission\",\"id\":\"%s\",\"decision\":\"approved\"}\n",
+                 s->promptId);
+        ble_nus_send((const uint8_t*)resp, strlen(resp));
+        state_machine_record_approval();
+        uint32_t took = now_ms - s_prompt_arrived_ms;
+        if (took < 5000) {
+            state_machine_trigger_oneshot(P_HEART, 2000);
+        }
+        s->promptId[0] = '\0';
+    }
+}
+
+static void on_deny(void)
+{
+    struct TamaState* s = data_state();
+    if (s->promptId[0]) {
+        char resp[256];
+        snprintf(resp, sizeof(resp),
+                 "{\"cmd\":\"permission\",\"id\":\"%s\",\"decision\":\"denied\"}\n",
+                 s->promptId);
+        ble_nus_send((const uint8_t*)resp, strlen(resp));
+        s->promptId[0] = '\0';
     }
 }
 
@@ -80,6 +130,8 @@ void app_main(void)
 
     display_init();
     touch_init();
+    display_set_approve_cb(on_approve);
+    display_set_deny_cb(on_deny);
 
     ble_nus_set_connection_cb(on_ble_connected);
     ble_nus_set_rx_cb(on_ble_rx);

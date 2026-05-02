@@ -30,3 +30,10 @@ void display_show_buddy(const struct TamaState* state, enum PersonaState persona
 void display_show_clock(const struct TamaState* state);
 void display_show_info(const struct TamaState* state);
 void display_show_transcript(const struct TamaState* state);
+
+typedef void (*display_approve_cb_t)(void);
+typedef void (*display_deny_cb_t)(void);
+
+void display_set_approve_cb(display_approve_cb_t cb);
+void display_set_deny_cb(display_deny_cb_t cb);
+void display_show_permission(bool show, const char* tool, const char* hint);
