@@ -12,6 +12,7 @@
 #include "state_machine.h"
 
 static const char* TAG = "buddy";
+static uint32_t s_prompt_arrived_ms = 0;
 
 static void app_task(void* arg)
 {
@@ -23,7 +24,6 @@ static void app_task(void* arg)
     data_set_demo(true);
     ESP_LOGI(TAG, "Demo mode enabled. Touch the screen to interact.");
 
-    static uint32_t s_prompt_arrived_ms = 0;
     static char s_last_prompt_id[40] = "";
 
     while (1) {
@@ -32,7 +32,8 @@ static void app_task(void* arg)
         active_state = state_machine_update(base_state);
 
         if (tama->promptId[0] && strcmp(tama->promptId, s_last_prompt_id) != 0) {
-            strncpy(s_last_prompt_id, tama->promptId, sizeof(s_last_prompt_id) - 1);
+            memcpy(s_last_prompt_id, tama->promptId, sizeof(s_last_prompt_id) - 1);
+            s_last_prompt_id[sizeof(s_last_prompt_id) - 1] = '\0';
             s_prompt_arrived_ms = (uint32_t)(esp_timer_get_time() / 1000);
         }
         if (!tama->promptId[0]) {

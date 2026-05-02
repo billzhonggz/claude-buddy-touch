@@ -10,6 +10,9 @@ static lv_obj_t* s_clock_label;
 static lv_obj_t* s_info_label;
 static lv_obj_t* s_transcript_label;
 
+static void approve_btn_cb(lv_event_t* e);
+static void deny_btn_cb(lv_event_t* e);
+
 static const char* BUDDY[] = {
     [P_SLEEP] =
         "            \n"
@@ -182,7 +185,7 @@ void display_init(void)
     s_clock_label = lv_label_create(ui.scr);
     lv_obj_set_style_text_color(s_clock_label, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
     lv_obj_set_style_text_align(s_clock_label, LV_TEXT_ALIGN_CENTER, LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(s_clock_label, &lv_font_montserrat_48, LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(s_clock_label, &lv_font_montserrat_36, LV_STATE_DEFAULT);
     lv_obj_set_width(s_clock_label, DISP_W);
     lv_obj_center(s_clock_label);
     lv_obj_add_flag(s_clock_label, LV_OBJ_FLAG_HIDDEN);
