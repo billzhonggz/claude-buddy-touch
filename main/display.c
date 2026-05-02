@@ -5,6 +5,11 @@
 
 static const char* TAG = "display";
 
+static enum DisplayMode s_mode = DISPLAY_MODE_BUDDY;
+static lv_obj_t* s_clock_label;
+static lv_obj_t* s_info_label;
+static lv_obj_t* s_transcript_label;
+
 static const char* BUDDY[] = {
     [P_SLEEP] =
         "            \n"
@@ -133,9 +138,31 @@ void display_init(void)
     lv_obj_align(ui.prompt, LV_ALIGN_TOP_LEFT, 10, 480);
 
     ui.hint = lv_label_create(ui.scr);
-    lv_label_set_text(ui.hint, "Tap: next  Hold: toggle demo");
+    lv_label_set_text(ui.hint, "Tap: next  Hold: toggle demo  Swipe L/R: screens");
     lv_obj_set_style_text_color(ui.hint, lv_color_hex(0x444444), LV_STATE_DEFAULT);
     lv_obj_align(ui.hint, LV_ALIGN_BOTTOM_LEFT, 10, -10);
+
+    s_clock_label = lv_label_create(ui.scr);
+    lv_obj_set_style_text_color(s_clock_label, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+    lv_obj_set_style_text_align(s_clock_label, LV_TEXT_ALIGN_CENTER, LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(s_clock_label, &lv_font_montserrat_48, LV_STATE_DEFAULT);
+    lv_obj_set_width(s_clock_label, DISP_W);
+    lv_obj_center(s_clock_label);
+    lv_obj_add_flag(s_clock_label, LV_OBJ_FLAG_HIDDEN);
+
+    s_info_label = lv_label_create(ui.scr);
+    lv_obj_set_style_text_color(s_info_label, lv_color_hex(0xCCCCCC), LV_STATE_DEFAULT);
+    lv_obj_set_width(s_info_label, DISP_W - 20);
+    lv_obj_align(s_info_label, LV_ALIGN_TOP_LEFT, 10, 80);
+    lv_obj_add_flag(s_info_label, LV_OBJ_FLAG_HIDDEN);
+
+    s_transcript_label = lv_label_create(ui.scr);
+    lv_obj_set_style_text_color(s_transcript_label, lv_color_hex(0xCCCCCC), LV_STATE_DEFAULT);
+    lv_obj_set_width(s_transcript_label, DISP_W - 20);
+    lv_obj_set_height(s_transcript_label, DISP_H - 100);
+    lv_obj_align(s_transcript_label, LV_ALIGN_TOP_LEFT, 10, 40);
+    lv_label_set_long_mode(s_transcript_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_add_flag(s_transcript_label, LV_OBJ_FLAG_HIDDEN);
 
     lv_scr_load(ui.scr);
 
@@ -179,9 +206,9 @@ void display_show_hello(void)
     display_unlock();
 }
 
-void display_update(const struct TamaState* state, enum PersonaState persona)
+void display_show_buddy(const struct TamaState* state, enum PersonaState persona)
 {
-    if (!ui.scr) return;
+    if (s_mode != DISPLAY_MODE_BUDDY) return;
 
     char buf[128];
 
@@ -236,4 +263,124 @@ void display_update(const struct TamaState* state, enum PersonaState persona)
     } else {
         lv_obj_add_flag(ui.prompt, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+void display_show_clock(const struct TamaState* state)
+{
+    if (s_mode != DISPLAY_MODE_CLOCK) return;
+    if (!s_clock_label) return;
+
+    char buf[128];
+    if (state->connected) {
+        snprintf(buf, sizeof(buf), "%s\n\nConnected",
+                 state->msg[0] ? state->msg : "Claude Buddy");
+    } else {
+        snprintf(buf, sizeof(buf), "No Connection\n\nTouch or swipe");
+    }
+    lv_label_set_text(s_clock_label, buf);
+}
+
+void display_show_info(const struct TamaState* state)
+{
+    if (s_mode != DISPLAY_MODE_INFO) return;
+    if (!s_info_label) return;
+
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+        "Claude Buddy Touch\n"
+        "ESP32-P4 + ESP32-C6\n\n"
+        "Sessions: %u total\n"
+        "Running: %u   Waiting: %u\n"
+        "Tokens today: %lu\n\n"
+        "State: %s\n\n"
+        "Swipe L/R to navigate",
+        state->sessionsTotal,
+        state->sessionsRunning,
+        state->sessionsWaiting,
+        (unsigned long)state->tokensToday,
+        persona_state_names[state_machine_derive(state)]);
+    lv_label_set_text(s_info_label, buf);
+}
+
+void display_show_transcript(const struct TamaState* state)
+{
+    if (s_mode != DISPLAY_MODE_TRANSCRIPT) return;
+    if (!s_transcript_label) return;
+
+    char buf[600];
+    buf[0] = '\0';
+    for (uint8_t i = 0; i < state->nLines; i++) {
+        strncat(buf, state->lines[i], sizeof(buf) - strlen(buf) - 1);
+        strncat(buf, "\n", sizeof(buf) - strlen(buf) - 1);
+    }
+    if (buf[0] == '\0') {
+        strcpy(buf, "(no recent activity)");
+    }
+    lv_label_set_text(s_transcript_label, buf);
+}
+
+void display_update(const struct TamaState* state, enum PersonaState persona)
+{
+    if (!ui.scr) return;
+
+    switch (s_mode) {
+    case DISPLAY_MODE_BUDDY:
+        display_show_buddy(state, persona);
+        break;
+    case DISPLAY_MODE_CLOCK:
+        display_show_clock(state);
+        break;
+    case DISPLAY_MODE_INFO:
+        display_show_info(state);
+        break;
+    case DISPLAY_MODE_TRANSCRIPT:
+        display_show_transcript(state);
+        break;
+    default:
+        break;
+    }
+}
+
+void display_set_mode(enum DisplayMode mode)
+{
+    if (mode >= DISPLAY_MODE_COUNT) mode = DISPLAY_MODE_BUDDY;
+    s_mode = mode;
+
+    lv_obj_add_flag(ui.buddy, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui.session, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui.msg, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui.tokens, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui.state_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui.prompt, LV_OBJ_FLAG_HIDDEN);
+
+    if (s_clock_label) lv_obj_add_flag(s_clock_label, LV_OBJ_FLAG_HIDDEN);
+    if (s_info_label) lv_obj_add_flag(s_info_label, LV_OBJ_FLAG_HIDDEN);
+    if (s_transcript_label) lv_obj_add_flag(s_transcript_label, LV_OBJ_FLAG_HIDDEN);
+
+    switch (mode) {
+    case DISPLAY_MODE_BUDDY:
+        lv_obj_clear_flag(ui.buddy, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(ui.session, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(ui.msg, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(ui.tokens, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(ui.state_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(ui.prompt, LV_OBJ_FLAG_HIDDEN);
+        break;
+    case DISPLAY_MODE_CLOCK:
+        if (s_clock_label) lv_obj_clear_flag(s_clock_label, LV_OBJ_FLAG_HIDDEN);
+        break;
+    case DISPLAY_MODE_INFO:
+        if (s_info_label) lv_obj_clear_flag(s_info_label, LV_OBJ_FLAG_HIDDEN);
+        break;
+    case DISPLAY_MODE_TRANSCRIPT:
+        if (s_transcript_label) lv_obj_clear_flag(s_transcript_label, LV_OBJ_FLAG_HIDDEN);
+        break;
+    default:
+        break;
+    }
+}
+
+enum DisplayMode display_get_mode(void)
+{
+    return s_mode;
 }

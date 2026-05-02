@@ -33,6 +33,14 @@ static void app_task(void* arg)
         } else if (touch.event == TOUCH_EVENT_LONG_PRESS) {
             ESP_LOGI(TAG, "Long press at (%u, %u)", touch.x, touch.y);
             data_set_demo(!data_demo());
+        } else if (touch.event == TOUCH_EVENT_SWIPE_LEFT) {
+            enum DisplayMode m = display_get_mode();
+            m = (m + 1) % DISPLAY_MODE_COUNT;
+            display_set_mode(m);
+        } else if (touch.event == TOUCH_EVENT_SWIPE_RIGHT) {
+            enum DisplayMode m = display_get_mode();
+            m = (m == 0) ? (DISPLAY_MODE_COUNT - 1) : (m - 1);
+            display_set_mode(m);
         }
 
         display_lock();
