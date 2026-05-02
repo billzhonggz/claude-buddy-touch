@@ -56,6 +56,19 @@ static void app_task(void* arg)
             display_set_mode(m);
         }
 
+        static uint32_t last_status_tx = 0;
+        if (tama->connected && (tama->lastUpdated - last_status_tx >= 30000 || last_status_tx == 0)) {
+            last_status_tx = tama->lastUpdated;
+            char status[256];
+            snprintf(status, sizeof(status),
+                     "{\"cmd\":\"status\",\"connected\":true,"
+                     "\"sessions\":{\"total\":%u,\"running\":%u,\"waiting\":%u},"
+                     "\"tokens_today\":%lu}\n",
+                     tama->sessionsTotal, tama->sessionsRunning, tama->sessionsWaiting,
+                     (unsigned long)tama->tokensToday);
+            ble_nus_send((const uint8_t*)status, strlen(status));
+        }
+
         display_lock();
         display_update(tama, active_state);
         if (tama->promptId[0] && display_get_mode() == DISPLAY_MODE_BUDDY) {
@@ -105,6 +118,10 @@ static void on_ble_connected(bool connected)
 {
     if (connected) {
         ESP_LOGI(TAG, "BLE connected");
+        char msg[64];
+        snprintf(msg, sizeof(msg),
+                 "{\"cmd\":\"status\",\"connected\":true}\n");
+        ble_nus_send((const uint8_t*)msg, strlen(msg));
     } else {
         ESP_LOGI(TAG, "BLE disconnected");
     }
