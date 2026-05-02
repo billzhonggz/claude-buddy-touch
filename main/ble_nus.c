@@ -55,28 +55,28 @@ ble_nus_device_name(void)
 }
 
 static int
-nus_rx_write_cb(uint16_t conn_handle, uint16_t attr_handle,
-                struct ble_gatt_access_ctxt *ctxt, void *arg)
+nus_access_cb(uint16_t conn_handle, uint16_t attr_handle,
+              struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
-    if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
+    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
+        uint8_t *data = malloc(len + 1);
+        if (!data) return BLE_ATT_ERR_INSUFFICIENT_RES;
+
+        ble_hs_mbuf_to_flat(ctxt->om, data, len, NULL);
+        data[len] = '\0';
+
+        ESP_LOGI(TAG, "RX: %.*s", len, data);
+
+        if (s_rx_cb) {
+            s_rx_cb(data, len);
+        }
+
+        free(data);
         return 0;
     }
 
-    uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
-    uint8_t *data = malloc(len + 1);
-    if (!data) return BLE_ATT_ERR_INSUFFICIENT_RES;
-
-    ble_hs_mbuf_to_flat(ctxt->om, data, len, NULL);
-    data[len] = '\0';
-
-    ESP_LOGI(TAG, "RX: %.*s", len, data);
-
-    if (s_rx_cb) {
-        s_rx_cb(data, len);
-    }
-
-    free(data);
-    return 0;
+    return BLE_ATT_ERR_REQ_NOT_SUPPORTED;
 }
 
 static const struct ble_gatt_svc_def nus_gatt_svcs[] = {
@@ -86,13 +86,13 @@ static const struct ble_gatt_svc_def nus_gatt_svcs[] = {
         .characteristics = (struct ble_gatt_chr_def[]) {
             {
                 .uuid = &nus_rx_char_uuid.u,
-                .access_cb = nus_rx_write_cb,
+                .access_cb = nus_access_cb,
                 .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC,
             },
             {
                 .uuid = &nus_tx_char_uuid.u,
-                .access_cb = NULL,
-                .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_READ_ENC,
+                .access_cb = nus_access_cb,
+                .flags = BLE_GATT_CHR_F_NOTIFY,
                 .val_handle = &s_tx_attr_handle,
             },
             {
@@ -110,9 +110,11 @@ ble_nus_advertise(void)
 {
     struct ble_gap_adv_params adv_params;
     struct ble_hs_adv_fields fields;
+    struct ble_hs_adv_fields rsp_fields;
     int rc;
 
     memset(&fields, 0, sizeof(fields));
+    memset(&rsp_fields, 0, sizeof(rsp_fields));
 
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
 
@@ -123,13 +125,19 @@ ble_nus_advertise(void)
     fields.name_len = strlen(s_device_name);
     fields.name_is_complete = 1;
 
-    fields.uuids128 = (ble_uuid128_t *)&nus_svc_uuid;
-    fields.num_uuids128 = 1;
-    fields.uuids128_is_complete = 1;
-
     rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
         ESP_LOGE(TAG, "error setting advertisement data; rc=%d", rc);
+        return;
+    }
+
+    rsp_fields.uuids128 = (ble_uuid128_t *)&nus_svc_uuid;
+    rsp_fields.num_uuids128 = 1;
+    rsp_fields.uuids128_is_complete = 1;
+
+    rc = ble_gap_adv_rsp_set_fields(&rsp_fields);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "error setting scan response data; rc=%d", rc);
         return;
     }
 

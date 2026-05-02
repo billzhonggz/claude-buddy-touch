@@ -1,7 +1,7 @@
 # Porting Progress — Claude Desktop Buddy → ESP32-P4
 
-> **Updated**: 2026-04-30
-> **Status**: Phase 1 (Foundation) — Tasks 1-3, 6-9 complete. Display shows animated ASCII buddy, session status, and demo mode (tap to cycle 5 scenarios). BLE (Tasks 4-5) blocked by C6 firmware RPC version mismatch — waiting on C6 flash tools.
+> **Updated**: 2026-05-02
+> **Status**: Phase 1 (Foundation) — All tasks complete. BLE advertising and connections working. Display shows animated ASCII buddy, session status, and demo mode.
 
 ---
 
@@ -30,7 +30,7 @@ Porting the [claude-desktop-buddy](https://github.com/anthropics/claude-desktop-
 - **JSON parsing** — cJSON-based data layer with TamaState, demo mode, BLE feed buffer
 - **State machine** — PersonaState derivation (idle, busy, attention, celebrate) from session data
 - **ASCII buddy** — Capybara-style ASCII art animating per persona state (7 expressions)
-- **BLE NUS code** — Written and compiles; runtime blocked on C6 firmware update
+- **BLE NUS service** — Advertising as `Claude-XXXX`, accepts incoming connections via Nordic UART Service
 
 ---
 
@@ -67,8 +67,8 @@ The BSP from Waveshare examples was written for IDF 5.x. These changes were need
 | 2. BSP component | ✅ Done | Waveshare BSP adapted for IDF v6.0 |
 | 3. Display via LVGL | ✅ Done | Shows animated ASCII buddy + status |
 | 4. C6 hosted setup (code) | ✅ Done | `ble_nus.c/h` written. Managed components fetched. |
-| 4b. C6 BT controller init | ❌ Blocked | C6 firmware needs reflash to match ESP-Hosted 2.12.0 |
-| 5. BLE NUS service | ⏸ Blocked by Task 4b | Ready, needs working BT controller |
+| 4b. C6 BT controller init | ✅ Done | C6 reflashed with ESP-Hosted slave FW v2.12.6 |
+| 5. BLE NUS service | ✅ Done | Advertising & connections working via NUS |
 | 6. **data.h port** | ✅ **Done** | cJSON-based JSON parsing, TamaState, demo mode, BLE line buffer |
 | 7. **State display** | ✅ **Done** | Dynamic status: Connecting/Connected/Idle/Active with colored dot |
 | 8. **Touch stub** | ✅ **Done** | Tap (advance demo), long-press (toggle demo) |
@@ -80,7 +80,13 @@ The BSP from Waveshare examples was written for IDF 5.x. These changes were need
 
 **C6 capabilities:** C6 reports `capabilities: 0xd` = WLAN + HCI over SDIO + BLE only. `vhci_drv: Host BT Support: Enabled, BT Transport Type: VHCI` confirms P4-side VHCI driver is ready.
 
-**BT controller init:** ❌ Fails — RPC protocol version mismatch (host 2.12.0 vs C6 0.0.0).
+**C6 firmware:** ✅ Updated to ESP-Hosted slave FW v2.12.6 (was factory v0.0.6). RPC protocol version mismatch resolved.
+
+**BT controller init:** ✅ `esp_hosted_bt_controller_init()` and `esp_hosted_bt_controller_enable()` succeed.
+
+**BLE NUS service:** ✅ Advertising as `Claude-XXXX`, accepts incoming connections. Two issues resolved during bringup:
+  1. **`ble_gatts_count_cfg rc=3`** (`BLE_HS_EINVAL`) — TX characteristic had `.access_cb = NULL`. NimBLE requires non-NULL access callbacks on all characteristics. Fixed by providing a shared access callback.
+  2. **`ble_gap_adv_set_fields rc=4`** (`BLE_HS_EMSGSIZE`) — Advertisement data (flags + tx_power + name + 128-bit UUID) exceeded 31-byte limit. Fixed by moving 128-bit UUID to scan response.
 
 ---
 
@@ -99,7 +105,7 @@ claude-buddy-touch/
 │   ├── tama_state.h                     # TamaState struct definition
 │   ├── data.h                           # JSON parsing, demo mode, BLE buffer (header-only)
 │   ├── touch.c/h                        # Gesture detection (tap, long-press)
-│   ├── ble_nus.c/h                      # BLE NUS service (blocked, compiles)
+│   ├── ble_nus.c/h                      # BLE NUS service (advertising, connected)
 ├── components/
 │   └── esp32_p4_wifi6_touch_lcd_4_3/    # Waveshare BSP (patched for IDF v6.0)
 ├── managed_components/
